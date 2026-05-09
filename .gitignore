@@ -1,0 +1,62 @@
+## .NET / Visual Studio
+bin/
+obj/
+out/
+[Dd]ebug/
+[Rr]elease/
+x64/
+x86/
+[Aa][Rr][Mm]/
+[Aa][Rr][Mm]64/
+[Bb]in/
+[Oo]bj/
+[Ll]og/
+[Ll]ogs/
+
+## VS / Rider / VSCode
+.vs/
+.vscode/
+.idea/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+*.userprefs
+*.DotSettings.user
+
+## Build / Publish
+publish/
+*.publishsettings
+*.pubxml
+*.pubxml.user
+
+## NuGet
+*.nupkg
+*.snupkg
+*.nuget.props
+*.nuget.targets
+.nuget/
+packages/
+!packages/build/
+
+## Test results
+[Tt]est[Rr]esult*/
+*.trx
+*.coverage
+*.coveragexml
+coverage*/
+
+## Misc
+*.cache
+*.tmp
+*.log
+*.swp
+Thumbs.db
+.DS_Store
+
+## App-specific
+*.local.json
+local.settings.json
+
+## Local NuGet config (proxy etc.) — keep out of repo
+NuGet.Config
