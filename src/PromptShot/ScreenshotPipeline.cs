@@ -17,10 +17,13 @@ namespace PromptShot;
 /// </summary>
 internal sealed class ScreenshotPipeline
 {
+    private static readonly TimeSpan DedupWindow = TimeSpan.FromMilliseconds(1500);
+
     private readonly ConfigStore _configStore;
     private readonly ClipboardGuard _guard;
     private AppConfig _config;
     private int _sessionCount;
+    private DateTimeOffset _lastProcessedUtc = DateTimeOffset.MinValue;
 
     public event EventHandler<ScreenshotSavedEventArgs>? ScreenshotSaved;
     public event EventHandler<Exception>? PipelineError;
@@ -72,6 +75,7 @@ internal sealed class ScreenshotPipeline
 
             var clipboardText = TemplateRenderer.RenderClipboard(_config.ClipboardTemplate, fullPath, now);
             _guard.WriteText(clipboardText);
+            _lastProcessedUtc = DateTimeOffset.UtcNow;
 
             Interlocked.Increment(ref _sessionCount);
             ScreenshotSaved?.Invoke(this, new ScreenshotSavedEventArgs(fullPath, clipboardText));
@@ -80,6 +84,73 @@ internal sealed class ScreenshotPipeline
         {
             PipelineError?.Invoke(this, ex);
         }
+    }
+
+    /// <summary>
+    /// Обработка PNG-файла, появившегося во внешней папке (FileSystemWatcher fallback
+    /// для Win+PrintScreen и инструментов, которые сохраняют в файл, но не в clipboard).
+    /// Должно вызываться на UI/STA-треде — внутри пишем в Clipboard.
+    /// </summary>
+    public void ProcessExternalFile(string sourcePath)
+    {
+        if (!_config.Enabled) return;
+        if (string.IsNullOrWhiteSpace(sourcePath)) return;
+
+        try
+        {
+            if (!File.Exists(sourcePath)) return;
+
+            var outputDir = ConfigStore.ExpandPath(_config.OutputDirectory);
+            var fullSource = Path.GetFullPath(sourcePath);
+            var fullOutput = Path.GetFullPath(outputDir);
+
+            // Защита от петли: файл уже внутри нашей output-папки.
+            if (fullSource.StartsWith(fullOutput + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(fullSource, fullOutput, StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
+
+            // Дедупликация с clipboard-веткой: если только что обработали скриншот через
+            // OnClipboardChanged, скорее всего это тот же кадр продублировался файлом.
+            if (DateTimeOffset.UtcNow - _lastProcessedUtc < DedupWindow) return;
+
+            Directory.CreateDirectory(outputDir);
+            var now = DateTimeOffset.Now;
+            var filename = SanitizeFilename(TemplateRenderer.RenderFilename(_config.FilenameTemplate, now));
+            var fullPath = Path.Combine(outputDir, filename);
+
+            CopyWithRetry(fullSource, fullPath);
+
+            var clipboardText = TemplateRenderer.RenderClipboard(_config.ClipboardTemplate, fullPath, now);
+            _guard.WriteText(clipboardText);
+            _lastProcessedUtc = DateTimeOffset.UtcNow;
+
+            Interlocked.Increment(ref _sessionCount);
+            ScreenshotSaved?.Invoke(this, new ScreenshotSavedEventArgs(fullPath, clipboardText));
+        }
+        catch (Exception ex)
+        {
+            PipelineError?.Invoke(this, ex);
+        }
+    }
+
+    private static void CopyWithRetry(string src, string dst)
+    {
+        const int attempts = 5;
+        for (var i = 0; i < attempts - 1; i++)
+        {
+            try
+            {
+                File.Copy(src, dst, overwrite: true);
+                return;
+            }
+            catch (IOException)
+            {
+                Thread.Sleep(100);
+            }
+        }
+        File.Copy(src, dst, overwrite: true);
     }
 
     private static string? SafeGetText()

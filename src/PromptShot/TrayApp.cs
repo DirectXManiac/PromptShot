@@ -2,6 +2,7 @@ using System;
 using System.Diagnostics;
 using System.Drawing;
 using System.IO;
+using System.Threading;
 using System.Windows.Forms;
 using PromptShot.Config;
 using PromptShot.Storage;
@@ -20,11 +21,21 @@ internal sealed class TrayApp : ApplicationContext
     private readonly ConfigStore _configStore;
     private readonly ToolStripMenuItem _enabledMenuItem;
     private readonly ToolStripMenuItem _statsMenuItem;
+    private readonly SynchronizationContext _uiContext;
+    private ScreenshotFolderWatcher? _folderWatcher;
 
     public TrayApp()
     {
         _configStore = new ConfigStore();
         var config = _configStore.LoadOrCreate();
+
+        // WindowsFormsSynchronizationContext ставится автоматически при Application.Run,
+        // но мы можем создаваться раньше — подстрахуемся.
+        if (SynchronizationContext.Current is null)
+        {
+            SynchronizationContext.SetSynchronizationContext(new WindowsFormsSynchronizationContext());
+        }
+        _uiContext = SynchronizationContext.Current!;
 
         _guard = new ClipboardGuard();
         _pipeline = new ScreenshotPipeline(_configStore, _guard, config);
@@ -64,6 +75,21 @@ internal sealed class TrayApp : ApplicationContext
 
         _watcher = new ClipboardWatcher();
         _watcher.ClipboardChanged += (_, _) => _pipeline.OnClipboardChanged();
+
+        StartFolderWatcher(config);
+    }
+
+    private void StartFolderWatcher(AppConfig config)
+    {
+        _folderWatcher?.Dispose();
+        _folderWatcher = null;
+
+        if (!config.WatchScreenshotFolders) return;
+        if (config.ScreenshotFolders is null || config.ScreenshotFolders.Count == 0) return;
+
+        _folderWatcher = new ScreenshotFolderWatcher(
+            config.ScreenshotFolders,
+            path => _uiContext.Post(_ => _pipeline.ProcessExternalFile(path), null));
     }
 
     private void OnScreenshotSaved(object? sender, ScreenshotSavedEventArgs e)
@@ -116,6 +142,7 @@ internal sealed class TrayApp : ApplicationContext
         var cfg = _configStore.LoadOrCreate();
         _pipeline.ReplaceConfig(cfg);
         _enabledMenuItem.Checked = cfg.Enabled;
+        StartFolderWatcher(cfg);
         _notifyIcon.BalloonTipTitle = "PromptShot";
         _notifyIcon.BalloonTipText = "Config reloaded";
         _notifyIcon.BalloonTipIcon = ToolTipIcon.Info;
@@ -165,6 +192,7 @@ internal sealed class TrayApp : ApplicationContext
             _notifyIcon.Visible = false;
             _notifyIcon.Dispose();
             _watcher.Dispose();
+            _folderWatcher?.Dispose();
         }
         base.Dispose(disposing);
     }

@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.Text.Json.Serialization;
 
 namespace PromptShot.Config;
@@ -24,6 +25,15 @@ internal sealed class AppConfig
 
     [JsonPropertyName("imageFormat")]
     public string ImageFormat { get; set; } = "png";
+
+    [JsonPropertyName("watchScreenshotFolders")]
+    public bool WatchScreenshotFolders { get; set; } = false;
+
+    [JsonPropertyName("screenshotFolders")]
+    public List<string> ScreenshotFolders { get; set; } = new()
+    {
+        "%USERPROFILE%\\Pictures\\Screenshots",
+    };
 
     public static AppConfig CreateDefault() => new();
 }
