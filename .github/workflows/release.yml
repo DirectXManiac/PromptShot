@@ -1,0 +1,110 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version (without leading v), e.g. 0.2.0'
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build artifacts & publish release
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Compute version
+        id: ver
+        shell: pwsh
+        run: |
+          if ('${{ github.event_name }}' -eq 'workflow_dispatch') {
+            $ver = '${{ github.event.inputs.version }}'
+          } else {
+            $ver = '${{ github.ref_name }}' -replace '^v',''
+          }
+          if ([string]::IsNullOrWhiteSpace($ver)) { throw 'Version is empty' }
+          Write-Host "Version: $ver"
+          "version=$ver" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
+      - name: Restore
+        run: dotnet restore PromptShot.sln
+
+      - name: Run tests
+        run: dotnet test PromptShot.sln -c Release --verbosity minimal
+
+      - name: Publish self-contained (single file)
+        shell: pwsh
+        run: |
+          dotnet publish src/PromptShot/PromptShot.csproj `
+            -c Release -r win-x64 `
+            --self-contained true `
+            /p:PublishSingleFile=true `
+            /p:IncludeNativeLibrariesForSelfExtract=true `
+            /p:DebugType=None `
+            /p:DebugSymbols=false `
+            /p:Version=${{ steps.ver.outputs.version }} `
+            -o publish/self-contained
+
+      - name: Publish framework-dependent (single file)
+        shell: pwsh
+        run: |
+          dotnet publish src/PromptShot/PromptShot.csproj `
+            -c Release -r win-x64 `
+            --self-contained false `
+            /p:PublishSingleFile=true `
+            /p:DebugType=None `
+            /p:DebugSymbols=false `
+            /p:Version=${{ steps.ver.outputs.version }} `
+            -o publish/framework-dep
+
+      - name: Stage release artifacts
+        shell: pwsh
+        run: |
+          $v = '${{ steps.ver.outputs.version }}'
+          New-Item -ItemType Directory -Path artifacts -Force | Out-Null
+          Copy-Item publish/self-contained/PromptShot.exe "artifacts/PromptShot-$v-win-x64-self-contained.exe"
+          Copy-Item publish/framework-dep/PromptShot.exe  "artifacts/PromptShot-$v-win-x64.exe"
+          Get-ChildItem artifacts | Format-Table -AutoSize
+
+      - name: Generate SHA-256 checksums
+        shell: pwsh
+        run: |
+          Get-ChildItem artifacts/*.exe | ForEach-Object {
+            $hash = (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower()
+            "$hash  $($_.Name)"
+          } | Out-File artifacts/SHA256SUMS.txt -Encoding ascii
+          Get-Content artifacts/SHA256SUMS.txt
+
+      - name: Upload artifacts (workflow run)
+        uses: actions/upload-artifact@v4
+        with:
+          name: PromptShot-${{ steps.ver.outputs.version }}-win-x64
+          path: artifacts/*
+          if-no-files-found: error
+
+      - name: Create GitHub Release
+        if: github.event_name == 'push'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: PromptShot ${{ steps.ver.outputs.version }}
+          files: |
+            artifacts/PromptShot-${{ steps.ver.outputs.version }}-win-x64-self-contained.exe
+            artifacts/PromptShot-${{ steps.ver.outputs.version }}-win-x64.exe
+            artifacts/SHA256SUMS.txt
+          generate_release_notes: true
+          draft: false
+          prerelease: ${{ contains(github.ref_name, '-') }}

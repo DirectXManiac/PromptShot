@@ -11,9 +11,6 @@
     <RootNamespace>PromptShot</RootNamespace>
     <AssemblyName>PromptShot</AssemblyName>
     <ApplicationManifest>app.manifest</ApplicationManifest>
-    <PublishSingleFile>true</PublishSingleFile>
-    <SelfContained>false</SelfContained>
-    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <Version>0.1.0</Version>
     <Authors>DirectXManiac</Authors>
     <Product>PromptShot</Product>
