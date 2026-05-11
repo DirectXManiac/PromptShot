@@ -65,7 +65,8 @@ internal sealed class TrayApp : ApplicationContext
         menu.Items.Add(_autoStartMenuItem);
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add("Open screenshots folder", null, OnOpenScreenshotsFolder);
-        menu.Items.Add("Open config", null, OnOpenConfig);
+        menu.Items.Add("Settings…", null, OnOpenSettings);
+        menu.Items.Add("Open config file", null, OnOpenConfig);
         menu.Items.Add("Reload config", null, OnReloadConfig);
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add(_statsMenuItem);
@@ -193,6 +194,23 @@ internal sealed class TrayApp : ApplicationContext
             _configStore.Save(_pipeline.Config);
         }
         Process.Start(new ProcessStartInfo(_configStore.ConfigPath) { UseShellExecute = true });
+    }
+
+    private void OnOpenSettings(object? sender, EventArgs e)
+    {
+        var window = new UI.SettingsWindow(_pipeline.Config);
+        window.Applied += (_, updated) => ApplyConfigChanges(updated);
+        window.ShowDialog();
+    }
+
+    private void ApplyConfigChanges(AppConfig updated)
+    {
+        _configStore.Save(updated);
+        _pipeline.ReplaceConfig(updated);
+        _enabledMenuItem.Checked = updated.Enabled;
+        _autoStartMenuItem.Checked = AutoStartManager.IsEnabled();
+        StartFolderWatcher(updated);
+        StartHotkey(updated);
     }
 
     private void OnReloadConfig(object? sender, EventArgs e)

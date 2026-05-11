@@ -1,0 +1,114 @@
+<Window x:Class="PromptShot.UI.SettingsWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:ClassModifier="internal"
+        Title="PromptShot — Settings"
+        Width="640" Height="640"
+        MinWidth="560" MinHeight="560"
+        WindowStartupLocation="CenterScreen"
+        ResizeMode="CanResize"
+        ShowInTaskbar="True"
+        UseLayoutRounding="True"
+        SnapsToDevicePixels="True">
+    <Window.Resources>
+        <Style TargetType="TextBlock" x:Key="LabelText">
+            <Setter Property="Margin" Value="0,8,8,4"/>
+            <Setter Property="VerticalAlignment" Value="Center"/>
+        </Style>
+        <Style TargetType="TextBlock" x:Key="HintText">
+            <Setter Property="Foreground" Value="#666"/>
+            <Setter Property="FontSize" Value="11"/>
+            <Setter Property="Margin" Value="0,2,0,8"/>
+        </Style>
+        <Style TargetType="TextBox">
+            <Setter Property="Padding" Value="6,4"/>
+            <Setter Property="Margin" Value="0,2,0,2"/>
+        </Style>
+        <Style TargetType="Button">
+            <Setter Property="Padding" Value="14,4"/>
+            <Setter Property="MinWidth" Value="80"/>
+            <Setter Property="Margin" Value="6,0,0,0"/>
+        </Style>
+    </Window.Resources>
+
+    <Grid Margin="14">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <ScrollViewer Grid.Row="0" VerticalScrollBarVisibility="Auto">
+            <StackPanel>
+
+                <CheckBox x:Name="EnabledCheck" Content="Enabled (listen to clipboard)" Margin="0,0,0,10"/>
+
+                <TextBlock Text="Output directory" Style="{StaticResource LabelText}"/>
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    <TextBox x:Name="OutputDirBox" Grid.Column="0"/>
+                    <Button x:Name="BrowseButton" Grid.Column="1" Content="Browse…" Click="BrowseButton_Click"/>
+                </Grid>
+                <TextBlock Style="{StaticResource HintText}"
+                           Text="Supports %TEMP%, %APPDATA%, %USERPROFILE% — expanded at save time."/>
+
+                <TextBlock Text="Filename template" Style="{StaticResource LabelText}"/>
+                <TextBox x:Name="FilenameTemplateBox" TextChanged="OnPreviewSourceChanged"/>
+                <TextBlock Style="{StaticResource HintText}"
+                           Text="Placeholders: {timestamp} {date} {time} {ts_unix} {rand}"/>
+                <Border Background="#F4F6FA" Padding="8,4" CornerRadius="3">
+                    <TextBlock x:Name="FilenamePreview" FontFamily="Consolas" Foreground="#1E4A99"/>
+                </Border>
+
+                <TextBlock Text="Clipboard template" Style="{StaticResource LabelText}"/>
+                <TextBox x:Name="ClipboardTemplateBox" TextChanged="OnPreviewSourceChanged"/>
+                <TextBlock Style="{StaticResource HintText}"
+                           Text="Placeholders: {path} {path_forward} {filename} {timestamp}. Escapes: \n \t"/>
+                <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
+                    <TextBlock Text="Presets:" Style="{StaticResource LabelText}"/>
+                    <Button Content="{}{path}"           Click="Preset_Click" Tag="{}{path}"/>
+                    <Button Content="@{path}"            Click="Preset_Click" Tag="@{path}"/>
+                    <Button Content="{}{path_forward}"   Click="Preset_Click" Tag="{}{path_forward}"/>
+                    <Button Content="With phrase"        Click="Preset_Click" Tag="Look at this screenshot: {path}\n"/>
+                </StackPanel>
+                <Border Background="#F4F6FA" Padding="8,4" CornerRadius="3">
+                    <TextBlock x:Name="ClipboardPreview" FontFamily="Consolas" Foreground="#1E4A99" TextWrapping="Wrap"/>
+                </Border>
+
+                <Grid Margin="0,12,0,0">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="80"/>
+                        <ColumnDefinition Width="*"/>
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Text="Retention days" Style="{StaticResource LabelText}" Grid.Column="0"/>
+                    <TextBox x:Name="RetentionDaysBox" Grid.Column="1" PreviewTextInput="OnDigitsOnlyInput"/>
+                    <TextBlock Style="{StaticResource HintText}" Grid.Column="2" Margin="8,8,0,0"
+                               Text="0 = never auto-clean."/>
+                </Grid>
+
+                <CheckBox x:Name="ShowToastCheck" Content="Show toast notifications" Margin="0,12,0,0"/>
+                <CheckBox x:Name="WatchFoldersCheck" Content="Watch screenshot folders (Win+PrintScreen fallback)" Margin="0,8,0,0"/>
+                <TextBlock Text="Folders to watch (one per line)" Style="{StaticResource LabelText}"/>
+                <TextBox x:Name="WatchFoldersBox" AcceptsReturn="True" Height="60" TextWrapping="NoWrap"
+                         VerticalScrollBarVisibility="Auto"/>
+
+                <CheckBox x:Name="AutoStartCheck" Content="Start with Windows" Margin="0,12,0,4"/>
+                <CheckBox x:Name="RepeatHotkeyCheck" Content="Enable repeat-hotkey (re-paste last screenshot path)" Margin="0,4,0,0"/>
+                <TextBlock Text="Hotkey combo" Style="{StaticResource LabelText}"/>
+                <TextBox x:Name="HotkeyBox"/>
+                <TextBlock Style="{StaticResource HintText}"
+                           Text="Format: Ctrl+Shift+V (modifiers: Ctrl, Shift, Alt, Win; key: A–Z, 0–9, F1–F24)."/>
+
+            </StackPanel>
+        </ScrollViewer>
+
+        <StackPanel Grid.Row="1" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,12,0,0">
+            <Button x:Name="ApplyButton"  Content="Apply"  Click="ApplyButton_Click"/>
+            <Button x:Name="OkButton"     Content="OK"     Click="OkButton_Click" IsDefault="True"/>
+            <Button x:Name="CancelButton" Content="Cancel" Click="CancelButton_Click" IsCancel="True"/>
+        </StackPanel>
+    </Grid>
+</Window>
