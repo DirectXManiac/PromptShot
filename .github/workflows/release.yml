@@ -58,6 +58,15 @@ jobs:
             /p:Version=${{ steps.ver.outputs.version }} `
             -o publish/self-contained
 
+      - name: Clean intermediates between publishes
+        shell: pwsh
+        run: |
+          # PublishSingleFile bundles the whole publish folder. Without a clean
+          # the framework-dependent build inherits the self-contained runtime
+          # files left in bin/obj and ends up 150MB instead of <1MB.
+          Remove-Item src/PromptShot/bin -Recurse -Force -ErrorAction SilentlyContinue
+          Remove-Item src/PromptShot/obj -Recurse -Force -ErrorAction SilentlyContinue
+
       - name: Publish framework-dependent (single file)
         shell: pwsh
         run: |
