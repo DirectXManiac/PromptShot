@@ -32,73 +32,96 @@ jobs:
           echo "Version: $ver"
           echo "version=$ver" >> "$GITHUB_OUTPUT"
 
-  build:
-    name: Build ${{ matrix.flavour }}
+  build-self-contained:
+    name: Build self-contained
     needs: resolve-version
     runs-on: windows-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - flavour: self-contained
-            self_contained: 'true'
-            extra_args: '/p:IncludeNativeLibrariesForSelfExtract=true'
-            artifact_suffix: 'win-x64-self-contained'
-          - flavour: framework-dependent
-            self_contained: 'false'
-            extra_args: ''
-            artifact_suffix: 'win-x64'
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup .NET 8
-        uses: actions/setup-dotnet@v4
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '8.0.x'
-
       - name: Restore
         run: dotnet restore PromptShot.sln
-
-      - name: Test (release config)
-        if: matrix.flavour == 'framework-dependent'
-        run: dotnet test PromptShot.sln -c Release --no-restore --verbosity minimal
-
-      - name: Publish ${{ matrix.flavour }}
+      - name: Publish self-contained
         shell: pwsh
         run: |
           dotnet publish src/PromptShot/PromptShot.csproj `
             -c Release -r win-x64 `
-            --self-contained ${{ matrix.self_contained }} `
+            --self-contained true `
             /p:PublishSingleFile=true `
+            /p:IncludeNativeLibrariesForSelfExtract=true `
             /p:DebugType=None `
             /p:DebugSymbols=false `
             /p:Version=${{ needs.resolve-version.outputs.version }} `
-            ${{ matrix.extra_args }} `
             -o publish
-
-      - name: Rename artifact
+      - name: Rename and sanity-check
         shell: pwsh
         run: |
           $v = '${{ needs.resolve-version.outputs.version }}'
-          $suffix = '${{ matrix.artifact_suffix }}'
           New-Item -ItemType Directory -Path out -Force | Out-Null
-          $name = "PromptShot-$v-$suffix.exe"
+          $name = "PromptShot-$v-win-x64-self-contained.exe"
           Copy-Item publish/PromptShot.exe "out/$name"
           $size = (Get-Item "out/$name").Length
           $sizeMb = [math]::Round($size / 1MB, 2)
           Write-Host "Built $name : $sizeMb MB"
-
-      - name: Upload binary
-        uses: actions/upload-artifact@v4
+          if ($sizeMb -lt 100) {
+            throw "Self-contained build is suspiciously small ($sizeMb MB). Expected ~150 MB."
+          }
+      - uses: actions/upload-artifact@v4
         with:
-          name: PromptShot-${{ matrix.artifact_suffix }}
+          name: PromptShot-self-contained
+          path: out/*.exe
+          if-no-files-found: error
+
+  build-framework-dependent:
+    name: Build framework-dependent
+    needs: resolve-version
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: Restore
+        run: dotnet restore PromptShot.sln
+      - name: Test
+        run: dotnet test PromptShot.sln -c Release --no-restore --verbosity minimal
+      - name: Publish framework-dependent
+        shell: pwsh
+        run: |
+          dotnet publish src/PromptShot/PromptShot.csproj `
+            -c Release -r win-x64 `
+            --self-contained false `
+            /p:PublishSingleFile=true `
+            /p:DebugType=None `
+            /p:DebugSymbols=false `
+            /p:Version=${{ needs.resolve-version.outputs.version }} `
+            -o publish
+      - name: Rename and sanity-check
+        shell: pwsh
+        run: |
+          $v = '${{ needs.resolve-version.outputs.version }}'
+          New-Item -ItemType Directory -Path out -Force | Out-Null
+          $name = "PromptShot-$v-win-x64.exe"
+          Copy-Item publish/PromptShot.exe "out/$name"
+          $size = (Get-Item "out/$name").Length
+          $sizeMb = [math]::Round($size / 1MB, 2)
+          Write-Host "Built $name : $sizeMb MB"
+          # Framework-dependent should be a small launcher; bundling the
+          # runtime accidentally would balloon it to ~150 MB. Catch that.
+          if ($sizeMb -gt 10) {
+            throw "Framework-dependent build is too large ($sizeMb MB). Expected <1 MB — the runtime got bundled."
+          }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: PromptShot-framework-dep
           path: out/*.exe
           if-no-files-found: error
 
   release:
     name: Publish GitHub release
-    needs: [resolve-version, build]
+    needs: [resolve-version, build-self-contained, build-framework-dependent]
     runs-on: ubuntu-latest
     steps:
       - name: Download all binaries
