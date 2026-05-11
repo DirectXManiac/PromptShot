@@ -85,21 +85,21 @@ jobs:
           dotnet-version: '8.0.x'
       - name: Show .NET SDK info
         run: dotnet --info
-      - name: Restore (framework-dep)
-        run: dotnet restore PromptShot.sln /p:SelfContained=false
+      - name: Restore
+        run: dotnet restore PromptShot.sln
       - name: Test
         run: dotnet test PromptShot.sln -c Release --no-restore --verbosity minimal
       - name: Publish framework-dependent
         shell: pwsh
         run: |
-          # SelfContained передаём через MSBuild property — --self-contained
-          # как CLI-флаг в комбинации с -r и PublishSingleFile вёл себя
-          # непредсказуемо на GHA windows-latest, давая self-contained
-          # binary несмотря на флаг.
+          # SelfContained передаём через MSBuild property — комбинация
+          # --self-contained false + -r + PublishSingleFile вела себя
+          # непредсказуемо на GHA windows-latest. Restore делаем без
+          # --no-restore, чтобы publish мог переподтянуть assets.json с
+          # учётом -r win-x64.
           dotnet publish src/PromptShot/PromptShot.csproj `
             -c Release `
             -r win-x64 `
-            --no-restore `
             -p:SelfContained=false `
             -p:PublishSingleFile=true `
             -p:DebugType=None `
