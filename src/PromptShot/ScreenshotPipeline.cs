@@ -30,6 +30,7 @@ internal sealed class ScreenshotPipeline
 
     public int SessionCount => _sessionCount;
     public AppConfig Config => _config;
+    public string? LastSavedPath { get; private set; }
 
     public ScreenshotPipeline(ConfigStore configStore, ClipboardGuard guard, AppConfig config)
     {
@@ -39,6 +40,20 @@ internal sealed class ScreenshotPipeline
     }
 
     public void ReplaceConfig(AppConfig config) => _config = config;
+
+    /// <summary>
+    /// Кладёт в clipboard рендер шаблона для последнего сохранённого скриншота.
+    /// Используется hotkey-режимом. Возвращает true если что-то положено.
+    /// </summary>
+    public bool RepasteLastPath()
+    {
+        var path = LastSavedPath;
+        if (string.IsNullOrEmpty(path) || !File.Exists(path)) return false;
+
+        var rendered = TemplateRenderer.RenderClipboard(_config.ClipboardTemplate, path, DateTimeOffset.Now);
+        _guard.WriteText(rendered);
+        return true;
+    }
 
     /// <summary>
     /// Точка входа из ClipboardWatcher. Должно вызываться на STA UI-треде.
@@ -76,6 +91,7 @@ internal sealed class ScreenshotPipeline
             var clipboardText = TemplateRenderer.RenderClipboard(_config.ClipboardTemplate, fullPath, now);
             _guard.WriteText(clipboardText);
             _lastProcessedUtc = DateTimeOffset.UtcNow;
+            LastSavedPath = fullPath;
 
             Interlocked.Increment(ref _sessionCount);
             ScreenshotSaved?.Invoke(this, new ScreenshotSavedEventArgs(fullPath, clipboardText));
@@ -125,6 +141,7 @@ internal sealed class ScreenshotPipeline
             var clipboardText = TemplateRenderer.RenderClipboard(_config.ClipboardTemplate, fullPath, now);
             _guard.WriteText(clipboardText);
             _lastProcessedUtc = DateTimeOffset.UtcNow;
+            LastSavedPath = fullPath;
 
             Interlocked.Increment(ref _sessionCount);
             ScreenshotSaved?.Invoke(this, new ScreenshotSavedEventArgs(fullPath, clipboardText));

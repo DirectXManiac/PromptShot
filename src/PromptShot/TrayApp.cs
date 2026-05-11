@@ -21,8 +21,11 @@ internal sealed class TrayApp : ApplicationContext
     private readonly ConfigStore _configStore;
     private readonly ToolStripMenuItem _enabledMenuItem;
     private readonly ToolStripMenuItem _statsMenuItem;
+    private readonly ToolStripMenuItem _autoStartMenuItem;
     private readonly SynchronizationContext _uiContext;
+    private readonly Icon _trayIcon;
     private ScreenshotFolderWatcher? _folderWatcher;
+    private HotkeyRegistrar? _hotkey;
 
     public TrayApp()
     {
@@ -50,10 +53,16 @@ internal sealed class TrayApp : ApplicationContext
             Checked = config.Enabled,
             CheckOnClick = false,
         };
+        _autoStartMenuItem = new ToolStripMenuItem("Start with Windows", image: null, OnToggleAutoStart)
+        {
+            Checked = AutoStartManager.IsEnabled(),
+            CheckOnClick = false,
+        };
         _statsMenuItem = new ToolStripMenuItem("Saved this session: 0") { Enabled = false };
 
         var menu = new ContextMenuStrip();
         menu.Items.Add(_enabledMenuItem);
+        menu.Items.Add(_autoStartMenuItem);
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add("Open screenshots folder", null, OnOpenScreenshotsFolder);
         menu.Items.Add("Open config", null, OnOpenConfig);
@@ -64,9 +73,10 @@ internal sealed class TrayApp : ApplicationContext
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add("Exit", null, OnExit);
 
+        _trayIcon = TrayIconFactory.Create();
         _notifyIcon = new NotifyIcon
         {
-            Icon = LoadTrayIcon(),
+            Icon = _trayIcon,
             Text = "PromptShot",
             Visible = true,
             ContextMenuStrip = menu,
@@ -77,6 +87,54 @@ internal sealed class TrayApp : ApplicationContext
         _watcher.ClipboardChanged += (_, _) => _pipeline.OnClipboardChanged();
 
         StartFolderWatcher(config);
+        StartHotkey(config);
+    }
+
+    private void OnToggleAutoStart(object? sender, EventArgs e)
+    {
+        try
+        {
+            var newState = !_autoStartMenuItem.Checked;
+            AutoStartManager.SetEnabled(newState);
+            _autoStartMenuItem.Checked = newState;
+            var cfg = _pipeline.Config;
+            cfg.AutoStart = newState;
+            _configStore.Save(cfg);
+        }
+        catch (Exception ex)
+        {
+            OnPipelineError(this, ex);
+        }
+    }
+
+    private void StartHotkey(AppConfig config)
+    {
+        _hotkey?.Dispose();
+        _hotkey = null;
+
+        if (!config.RepeatHotkeyEnabled || string.IsNullOrWhiteSpace(config.RepeatHotkey)) return;
+        try
+        {
+            _hotkey = new HotkeyRegistrar(config.RepeatHotkey);
+            _hotkey.Pressed += (_, _) => OnHotkeyPressed();
+        }
+        catch (Exception ex)
+        {
+            OnPipelineError(this, ex);
+        }
+    }
+
+    private void OnHotkeyPressed()
+    {
+        var ok = _pipeline.RepasteLastPath();
+        if (!_pipeline.Config.ShowToast) return;
+
+        _notifyIcon.BalloonTipTitle = "PromptShot";
+        _notifyIcon.BalloonTipText = ok
+            ? $"Re-pasted: {Path.GetFileName(_pipeline.LastSavedPath ?? "")}"
+            : "No screenshot in this session yet";
+        _notifyIcon.BalloonTipIcon = ToolTipIcon.Info;
+        _notifyIcon.ShowBalloonTip(1500);
     }
 
     private void StartFolderWatcher(AppConfig config)
@@ -142,7 +200,9 @@ internal sealed class TrayApp : ApplicationContext
         var cfg = _configStore.LoadOrCreate();
         _pipeline.ReplaceConfig(cfg);
         _enabledMenuItem.Checked = cfg.Enabled;
+        _autoStartMenuItem.Checked = AutoStartManager.IsEnabled();
         StartFolderWatcher(cfg);
+        StartHotkey(cfg);
         _notifyIcon.BalloonTipTitle = "PromptShot";
         _notifyIcon.BalloonTipText = "Config reloaded";
         _notifyIcon.BalloonTipIcon = ToolTipIcon.Info;
@@ -179,12 +239,6 @@ internal sealed class TrayApp : ApplicationContext
         });
     }
 
-    private static Icon LoadTrayIcon()
-    {
-        // Используем системную иконку до тех пор пока не добавим свою.
-        return SystemIcons.Application;
-    }
-
     protected override void Dispose(bool disposing)
     {
         if (disposing)
@@ -193,6 +247,8 @@ internal sealed class TrayApp : ApplicationContext
             _notifyIcon.Dispose();
             _watcher.Dispose();
             _folderWatcher?.Dispose();
+            _hotkey?.Dispose();
+            _trayIcon.Dispose();
         }
         base.Dispose(disposing);
     }

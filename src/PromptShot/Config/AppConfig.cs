@@ -35,5 +35,18 @@ internal sealed class AppConfig
         "%USERPROFILE%\\Pictures\\Screenshots",
     };
 
+    [JsonPropertyName("autoStart")]
+    public bool AutoStart { get; set; } = false;
+
+    [JsonPropertyName("repeatHotkeyEnabled")]
+    public bool RepeatHotkeyEnabled { get; set; } = false;
+
+    /// <summary>
+    /// Hotkey для повторной вставки последнего пути в clipboard.
+    /// Формат: <c>"Ctrl+Shift+V"</c>. Допустимые модификаторы: Ctrl, Shift, Alt, Win.
+    /// </summary>
+    [JsonPropertyName("repeatHotkey")]
+    public string RepeatHotkey { get; set; } = "Ctrl+Shift+V";
+
     public static AppConfig CreateDefault() => new();
 }
