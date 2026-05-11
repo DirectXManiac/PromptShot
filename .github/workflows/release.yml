@@ -14,9 +14,40 @@ permissions:
   contents: write
 
 jobs:
-  release:
-    name: Build artifacts & publish release
+  resolve-version:
+    name: Resolve version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.ver.outputs.version }}
+    steps:
+      - id: ver
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            ver="${{ github.event.inputs.version }}"
+          else
+            ver="${GITHUB_REF_NAME#v}"
+          fi
+          if [ -z "$ver" ]; then echo "Version is empty"; exit 1; fi
+          echo "Version: $ver"
+          echo "version=$ver" >> "$GITHUB_OUTPUT"
+
+  build:
+    name: Build ${{ matrix.flavour }}
+    needs: resolve-version
     runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - flavour: self-contained
+            self_contained: 'true'
+            extra_args: '/p:IncludeNativeLibrariesForSelfExtract=true'
+            artifact_suffix: 'win-x64-self-contained'
+          - flavour: framework-dependent
+            self_contained: 'false'
+            extra_args: ''
+            artifact_suffix: 'win-x64'
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -26,94 +57,90 @@ jobs:
         with:
           dotnet-version: '8.0.x'
 
-      - name: Compute version
-        id: ver
-        shell: pwsh
-        run: |
-          if ('${{ github.event_name }}' -eq 'workflow_dispatch') {
-            $ver = '${{ github.event.inputs.version }}'
-          } else {
-            $ver = '${{ github.ref_name }}' -replace '^v',''
-          }
-          if ([string]::IsNullOrWhiteSpace($ver)) { throw 'Version is empty' }
-          Write-Host "Version: $ver"
-          "version=$ver" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
-
       - name: Restore
         run: dotnet restore PromptShot.sln
 
-      - name: Run tests
-        run: dotnet test PromptShot.sln -c Release --verbosity minimal
+      - name: Test (release config)
+        if: matrix.flavour == 'framework-dependent'
+        run: dotnet test PromptShot.sln -c Release --no-restore --verbosity minimal
 
-      - name: Publish self-contained (single file)
+      - name: Publish ${{ matrix.flavour }}
         shell: pwsh
         run: |
           dotnet publish src/PromptShot/PromptShot.csproj `
             -c Release -r win-x64 `
-            --self-contained true `
-            /p:PublishSingleFile=true `
-            /p:IncludeNativeLibrariesForSelfExtract=true `
-            /p:DebugType=None `
-            /p:DebugSymbols=false `
-            /p:Version=${{ steps.ver.outputs.version }} `
-            -o publish/self-contained
-
-      - name: Clean intermediates between publishes
-        shell: pwsh
-        run: |
-          # PublishSingleFile bundles the whole publish folder. Without a clean
-          # the framework-dependent build inherits the self-contained runtime
-          # files left in bin/obj and ends up 150MB instead of <1MB.
-          Remove-Item src/PromptShot/bin -Recurse -Force -ErrorAction SilentlyContinue
-          Remove-Item src/PromptShot/obj -Recurse -Force -ErrorAction SilentlyContinue
-
-      - name: Publish framework-dependent (single file)
-        shell: pwsh
-        run: |
-          dotnet publish src/PromptShot/PromptShot.csproj `
-            -c Release -r win-x64 `
-            --self-contained false `
+            --self-contained ${{ matrix.self_contained }} `
             /p:PublishSingleFile=true `
             /p:DebugType=None `
             /p:DebugSymbols=false `
-            /p:Version=${{ steps.ver.outputs.version }} `
-            -o publish/framework-dep
+            /p:Version=${{ needs.resolve-version.outputs.version }} `
+            ${{ matrix.extra_args }} `
+            -o publish
 
-      - name: Stage release artifacts
+      - name: Rename artifact
         shell: pwsh
         run: |
-          $v = '${{ steps.ver.outputs.version }}'
-          New-Item -ItemType Directory -Path artifacts -Force | Out-Null
-          Copy-Item publish/self-contained/PromptShot.exe "artifacts/PromptShot-$v-win-x64-self-contained.exe"
-          Copy-Item publish/framework-dep/PromptShot.exe  "artifacts/PromptShot-$v-win-x64.exe"
-          Get-ChildItem artifacts | Format-Table -AutoSize
+          $v = '${{ needs.resolve-version.outputs.version }}'
+          $suffix = '${{ matrix.artifact_suffix }}'
+          New-Item -ItemType Directory -Path out -Force | Out-Null
+          $name = "PromptShot-$v-$suffix.exe"
+          Copy-Item publish/PromptShot.exe "out/$name"
+          $size = (Get-Item "out/$name").Length
+          $sizeMb = [math]::Round($size / 1MB, 2)
+          Write-Host "Built $name : $sizeMb MB"
 
-      - name: Generate SHA-256 checksums
-        shell: pwsh
-        run: |
-          Get-ChildItem artifacts/*.exe | ForEach-Object {
-            $hash = (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower()
-            "$hash  $($_.Name)"
-          } | Out-File artifacts/SHA256SUMS.txt -Encoding ascii
-          Get-Content artifacts/SHA256SUMS.txt
-
-      - name: Upload artifacts (workflow run)
+      - name: Upload binary
         uses: actions/upload-artifact@v4
         with:
-          name: PromptShot-${{ steps.ver.outputs.version }}-win-x64
-          path: artifacts/*
+          name: PromptShot-${{ matrix.artifact_suffix }}
+          path: out/*.exe
           if-no-files-found: error
+
+  release:
+    name: Publish GitHub release
+    needs: [resolve-version, build]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all binaries
+        uses: actions/download-artifact@v4
+        with:
+          path: downloaded
+          merge-multiple: true
+
+      - name: List downloaded files and sizes
+        shell: bash
+        run: |
+          ls -la downloaded/
+          for f in downloaded/*.exe; do
+            size_mb=$(echo "scale=2; $(stat -c%s "$f") / 1048576" | bc)
+            echo "$f : ${size_mb} MB"
+          done
+
+      - name: Generate SHA-256 checksums
+        shell: bash
+        run: |
+          cd downloaded
+          sha256sum *.exe > SHA256SUMS.txt
+          cat SHA256SUMS.txt
 
       - name: Create GitHub Release
         if: github.event_name == 'push'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.ref_name }}
-          name: PromptShot ${{ steps.ver.outputs.version }}
+          name: PromptShot ${{ needs.resolve-version.outputs.version }}
           files: |
-            artifacts/PromptShot-${{ steps.ver.outputs.version }}-win-x64-self-contained.exe
-            artifacts/PromptShot-${{ steps.ver.outputs.version }}-win-x64.exe
-            artifacts/SHA256SUMS.txt
+            downloaded/PromptShot-${{ needs.resolve-version.outputs.version }}-win-x64-self-contained.exe
+            downloaded/PromptShot-${{ needs.resolve-version.outputs.version }}-win-x64.exe
+            downloaded/SHA256SUMS.txt
           generate_release_notes: true
           draft: false
           prerelease: ${{ contains(github.ref_name, '-') }}
+
+      - name: Upload combined artifact (workflow_dispatch)
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/upload-artifact@v4
+        with:
+          name: PromptShot-${{ needs.resolve-version.outputs.version }}
+          path: downloaded/*
+          if-no-files-found: error
