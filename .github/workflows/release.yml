@@ -83,21 +83,39 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '8.0.x'
-      - name: Restore
-        run: dotnet restore PromptShot.sln
+      - name: Show .NET SDK info
+        run: dotnet --info
+      - name: Restore (framework-dep)
+        run: dotnet restore PromptShot.sln /p:SelfContained=false
       - name: Test
         run: dotnet test PromptShot.sln -c Release --no-restore --verbosity minimal
       - name: Publish framework-dependent
         shell: pwsh
         run: |
+          # SelfContained передаём через MSBuild property — --self-contained
+          # как CLI-флаг в комбинации с -r и PublishSingleFile вёл себя
+          # непредсказуемо на GHA windows-latest, давая self-contained
+          # binary несмотря на флаг.
           dotnet publish src/PromptShot/PromptShot.csproj `
-            -c Release -r win-x64 `
-            --self-contained false `
-            /p:PublishSingleFile=true `
-            /p:DebugType=None `
-            /p:DebugSymbols=false `
-            /p:Version=${{ needs.resolve-version.outputs.version }} `
+            -c Release `
+            -r win-x64 `
+            --no-restore `
+            -p:SelfContained=false `
+            -p:PublishSingleFile=true `
+            -p:DebugType=None `
+            -p:DebugSymbols=false `
+            -p:Version=${{ needs.resolve-version.outputs.version }} `
             -o publish
+      - name: Inspect publish output
+        shell: pwsh
+        run: |
+          Write-Host "=== publish/ tree ==="
+          Get-ChildItem publish -Recurse |
+            Select-Object FullName,@{N='SizeMB';E={[math]::Round($_.Length/1MB,3)}} |
+            Format-Table -AutoSize
+          $exe = Get-Item publish/PromptShot.exe
+          Write-Host ""
+          Write-Host "PromptShot.exe : $([math]::Round($exe.Length/1MB,3)) MB"
       - name: Rename and sanity-check
         shell: pwsh
         run: |
@@ -108,8 +126,6 @@ jobs:
           $size = (Get-Item "out/$name").Length
           $sizeMb = [math]::Round($size / 1MB, 2)
           Write-Host "Built $name : $sizeMb MB"
-          # Framework-dependent should be a small launcher; bundling the
-          # runtime accidentally would balloon it to ~150 MB. Catch that.
           if ($sizeMb -gt 10) {
             throw "Framework-dependent build is too large ($sizeMb MB). Expected <1 MB — the runtime got bundled."
           }
